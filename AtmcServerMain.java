@@ -20,12 +20,16 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
+import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.text.SimpleDateFormat;
+import java.util.Calendar;
+import java.util.Date;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -34,6 +38,7 @@ import javax.swing.JDialog;
 import javax.swing.JLabel;
 
 import org.apache.log4j.Logger;
+
 
 public class AtmcServerMain extends JDialog {
 
@@ -48,7 +53,7 @@ public class AtmcServerMain extends JDialog {
 	private AtmcServerMain() {
 		setIconImage(Toolkit.getDefaultToolkit().getImage("./aelogo2.jpg"));
 		label = new JLabel("服务运行中...");
-		this.setTitle("亚银自助管理系统客户端");
+		this.setTitle("乾康自助管理系统客户端");
 		this.setLayout(new FlowLayout());
 		this.add(label);
 		this.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
@@ -101,34 +106,35 @@ public class AtmcServerMain extends JDialog {
 	private int timeoutParam;
 	private int sleepTimeParam;
 	private String statusFileParam;
+	private String logFileParam;
 
 	// 程序入口
 	public static void main(String[] args) {
-//		// 设备编号
-//		String atmId = args[0];
-//
-//		// // 服务器信息
-//		int serverPort = Integer.parseInt(args[1]);
-//		int poolSize = Integer.parseInt(args[2]);
-//		// // 连接信息
-//		String ip = args[3];
-//		int port = Integer.parseInt(args[4]);
-//		int sleepTime = Integer.parseInt(args[5]);
-//		String statusFile = args[6];
-//		int timeout = Integer.parseInt(args[7]);
+		// 设备编号
+		String atmId = args[0];
 
-		 // ATM编号
-		 String atmId = "71111111";
-		 // 服务器信息
-		 int serverPort = 2702;
-		 int poolSize = 10;
-		 // 连接信息
-		 String ip = "32.221.32.65";
+		// // 服务器信息
+		int serverPort = Integer.parseInt(args[1]);
+		int poolSize = Integer.parseInt(args[2]);
+		// // 连接信息
+		String ip = args[3];
+		int port = Integer.parseInt(args[4]);
+		int sleepTime = Integer.parseInt(args[5]);
+//		String statusFile = args[6];
+		int timeout = Integer.parseInt(args[7]);
+
+//		 // ATM编号
+//		 String atmId = "71111111";
+//		 // 服务器信息
+//		 int serverPort = 2702;
+//		 int poolSize = 10;
+//		 // 连接信息
+//		 String ip = "32.221.32.65";
 //		 String ip = "127.0.0.1";
 
-		 int port = 2704 ;
-		 int timeout = 10;
-		 int sleepTime = 10;
+//		 int port = 2704 ;
+//		 int timeout = 10;
+//		 int sleepTime = 10;
 		 String statusFile = "c:/Status_Result.txt";
 		
 		 String ATMlogFile = "c:/xBankTrans/Trace/Trans.jrn";
@@ -142,15 +148,78 @@ public class AtmcServerMain extends JDialog {
 		asm.setTimeoutParam(timeout);
 		asm.setSleepTimeParam(sleepTime);
 		asm.setStatusFileParam(statusFile);
+		asm.setLogFileParam(ATMlogFile);
 
 		asm.startSendClient();
 		asm.startServer();
 
 	}
-	private void check_atm_status(){
+	//通过本地日志文件检查机器状态 true:真实故障 false：维护状态
+	private boolean check_atm_status(){
+		int position=-1;
+		String sub_time="";
+		
 		try{
+			logger.info("开始打开本地日志");
+			FileReader reader = new FileReader(getLogFileParam());
+			StringBuilder sb= new StringBuilder();
+			char[] dates = new char[1024];
+			int count = 0;
+			while((count = reader.read(dates))>0){
+				String str=String.valueOf(dates,0,count);
+				sb.append(str);
+			}
+			reader.close();
+			//获取日志中时间
+			String findstr="Maintenance";
+			position=sb.indexOf(findstr);
+			sub_time=sb.substring(position+12, position+20);
+		}
+		catch (FileNotFoundException fnfe) {
+			logger.error("没找到本地日志文件！");
+		}
+		catch (IOException e){
+			logger.error("读取文件出错");
+		}
+		
+		
+		SimpleDateFormat sdf=new SimpleDateFormat("yyyyMMddHH:mm:ss");
+		
+		Date date_check_time=new Date();
+		
+		Calendar cal_now=Calendar.getInstance();
+		try{
+			String year=String.valueOf(cal_now.get(Calendar.YEAR));
+			String month=String.valueOf(cal_now.get(Calendar.MONTH));
+			String day=String.valueOf(cal_now.get(Calendar.DAY_OF_MONTH));
+			//开始组装当前时间
+			StringBuilder sb_temp=new StringBuilder();
+			
+			sb_temp.append(year).append(month).append(day).append(sub_time);
+			sub_time=sb_temp.toString();
+			date_check_time=sdf.parse(sub_time);
 			
 		}
+		catch (Exception e){
+			logger.error(e.getMessage());
+		}
+		
+		Calendar cal_log=Calendar.getInstance();
+		cal_log.setTime(date_check_time);
+		
+		int i_distanceMinute=cal_now.get(Calendar.MINUTE)-cal_log.get(Calendar.MINUTE);
+		
+		if (-1!=position)
+			if (0<=i_distanceMinute && 40>=i_distanceMinute){
+				logger.info("机器进入维护状态，当前时间："+cal_now);
+				logger.info("日志时间:"+cal_log);
+				return false;
+			}
+			else
+				return true;
+		
+		return true;
+
 	}
 	/**
 	 * 启动连接
@@ -185,16 +254,44 @@ public class AtmcServerMain extends JDialog {
 									(new InputStreamReader(new FileInputStream(
 											getStatusFileParam()))));
 							String sendMsg = fileReader.readLine();
-							if (sendMsg != null) {
-								logger.info(sendMsg);
-								writer = new BufferedWriter(
-										new OutputStreamWriter(clientSocket
-												.getOutputStream()));
-								writer.write(getAtmIdParam() + "#" + sendMsg);
-//								writer.write( sendMsg);
-
-								writer.newLine();
-								writer.flush();
+							if (sendMsg.indexOf("ffff")!=-1)
+								if (check_atm_status()){
+									if (sendMsg != null) {
+										logger.info(sendMsg);
+										writer = new BufferedWriter(
+												new OutputStreamWriter(clientSocket
+														.getOutputStream()));
+										writer.write(getAtmIdParam() + "#" + sendMsg);
+		//								writer.write( sendMsg);
+		
+										writer.newLine();
+										writer.flush();
+									}
+								}
+								else{ 
+									sendMsg="55555";
+									logger.info(sendMsg);
+									writer = new BufferedWriter(
+											new OutputStreamWriter(clientSocket
+													.getOutputStream()));
+									writer.write(getAtmIdParam() + "#" + sendMsg);
+		//								writer.write( sendMsg);
+		
+									writer.newLine();
+									writer.flush();
+								}
+							else{
+								if (sendMsg != null) {
+									logger.info(sendMsg);
+									writer = new BufferedWriter(
+											new OutputStreamWriter(clientSocket
+													.getOutputStream()));
+									writer.write(getAtmIdParam() + "#" + sendMsg);
+	//								writer.write( sendMsg);
+	
+									writer.newLine();
+									writer.flush();
+								}
 							}
 						}
 					} catch (FileNotFoundException fnfe) {
@@ -617,6 +714,14 @@ public class AtmcServerMain extends JDialog {
 
 	public void setStatusFileParam(String statusFileParam) {
 		this.statusFileParam = statusFileParam;
+	}
+
+	public String getLogFileParam(){
+		return logFileParam;
+	}
+
+	public void setLogFileParam(String logFileParam){
+		this.logFileParam = logFileParam;
 	}
 
 }
